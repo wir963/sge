@@ -4,6 +4,26 @@ This profile configures [Snakemake](https://snakemake.readthedocs.io/en/stable/)
 
 ## Change log to run on UCL CS Cluster
 
+Don't use `sge-status.py` because it uses tools not supported by UCL cluster and may cause cluster to crash. 
+
+## Known issues/improvements
+
+We are currently restricting the number of cores per node to be 1 to avoid running multiple jobs on the same node when running [grouped jobs](https://snakemake.readthedocs.io/en/stable/executing/grouping.html). This is to solve errors when I download multiple files from SRA at the same time on the same node but this is also inefficient. 
+
+We are currently able to request local temp storage for jobs using `tscratch` (use an integer number for GB; most resources take integers for MB) but allocating the temp storage (and deleting it after the job is done) must be done within the job [HPC docs](https://hpc.cs.ucl.ac.uk/data-storage/) like below. 
+
+```
+rule example:
+    resources:
+        time="12:00:00",
+        mem_mb=64000,
+        tscratch=60,
+    shell:
+        "mkdir -p /scratch0/wrobinso/$JOB_ID \n"
+        "<INSERT COMMAND>"
+        'trap "rm -rf /scratch0/wrobinso/$JOB_ID" EXIT ERR INT TERM'
+``` 
+
 ## Setup
 
 ### Deploy profile

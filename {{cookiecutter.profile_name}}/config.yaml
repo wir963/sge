@@ -1,10 +1,16 @@
-restart-times: 3
-jobscript: sge-jobscript.sh
+restart-times: 0 # don't restart because usually it's a mistake; use retries for specific rules (downloads) likely to fail
+jobscript: "sge-jobscript.sh"
 cluster: "sge-submit.py"
-cluster-status: "sge-status.py"
+# cluster-status: "sge-status.py" # tools to check cluster status are not supported and discouraged by HPC staff; you'll have to handle job timeouts
 cluster-cancel: "sge-cancel.py"
 cluster-cancel-nargs: 20
 max-jobs-per-second: 1
-max-status-checks-per-second: 1
+# max-status-checks-per-second: 1 # NA
 latency-wait: 60
 local-cores: 1
+# Added by WR on 7/21/23
+cores: 1 # only use one core per node - if you group jobs (run multiple jobs on the same node), jobs will run sequentially; this prevents some errors but is inefficient so need to fix
+use-conda: true
+keep-going: true
+nolock: true
+jobs: 30 # submit max of 30 jobs at a time to the cluster aka be nice to other peeps

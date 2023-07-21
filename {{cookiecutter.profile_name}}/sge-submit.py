@@ -77,10 +77,14 @@ RESOURCE_MAPPING = {
     "h_vmem"           : ("h_vmem", "mem_mb", "mem", "memory", "virtual_memory"),
     "s_fsize"          : ("s_fsize", "soft_file_size"),
     # "disk_mb" is a default snakemake resource name which will be passed in
-    "h_fsize"          : ("h_fsize", "disk_mb", "file_size"),
+    # "h_fsize"          : ("h_fsize", "disk_mb", "file_size"), # UCL cluster can throw error when requesting h_fsize
+    "tmem"             : ("mem_mib"), # added by WR because tmem must be specified; may use mem_mb?
+    # "tscratch" allocates temporary storage - added by WR 6/5/23
+    "tscratch"         : ("tscratch"),
 }
 
-IGNORED_RESOURCES = ["mem_mib", "disk_mib"]
+IGNORED_RESOURCES = ["mem_mib", "disk_mib", "disk_mb"] # add "file_size" and "disk_mb" if issues arise
+
 
 NONREQUESTABLE_RESOURCES = ["tmpdir"]
 
@@ -127,16 +131,20 @@ def format_job_properties(string):
     # we use 'rulename' rather than 'rule' for consistency with the --cluster-config 
     # snakemake option
     if job_properties['type'] == 'group':
-      return string.format(rulename='snakejob', jobid=job_properties['jobid'])
-    return string.format(rulename='snakejob', jobid=job_properties['jobid'])
+      return string.format(rulename=job_properties["group_id"], jobid=job_properties['jobid']) #WR change 7/21 see https://github.com/Snakemake-Profiles/sge/pull/4
+    return string.format(rulename=job_properties["rule"], jobid=job_properties['jobid'])
 
 
 def parse_qsub_settings(source, resource_mapping=RESOURCE_MAPPING, option_mapping=OPTION_MAPPING):
     job_options = { "options" : {}, "resources" : {}}
 
     for skey, sval in source.items():
+        warnings.warn("sval")
+        warnings.warn(sval)
         found = False
         for rkey, rval in resource_mapping.items():
+            warnings.warn("rval")
+            warnings.warn(rval)
             if skey in IGNORED_RESOURCES:
                 found = True
                 break
@@ -146,10 +154,10 @@ def parse_qsub_settings(source, resource_mapping=RESOURCE_MAPPING, option_mappin
                 # plain integers for memory as bytes. This hack means we interpret memory
                 # requests as megabytes which maps to the snakemake resources "mem_mb"
                 # and "disk_mb".
-                if (rkey == 's_vmem') or (rkey == 'h_vmem'):
+                if rkey in ['s_vmem', 'h_vmem', 'tmem', 's_fsize', 'h_fsize']: # WR added tmem and tscratch so M gets added
                     job_options["resources"].update({rkey : str(sval) + 'M'})
-                elif (rkey == 's_fsize') or (rkey == 'h_fsize'):
-                    job_options["resources"].update({rkey : str(sval) + 'M'})
+                elif rkey in ['tscratch']:
+                    job_options["resources"].update({rkey : str(sval) + 'G'}) # use GB for tscratch
                 else:
                     job_options["resources"].update({rkey : sval})
                 break
@@ -160,7 +168,9 @@ def parse_qsub_settings(source, resource_mapping=RESOURCE_MAPPING, option_mappin
                 job_options["options"].update({okey : sval})
                 break
         if not found:
-            raise KeyError(f"Unknown SGE option or resource: {skey}")
+            warnings.warn(f"Unknown SGE option or resource: {skey}") # WR added 7/21
+            continue
+            # raise KeyError(f"Unknown SGE option or resource: {skey}")
 
     return job_options
 
@@ -226,9 +236,13 @@ def submit_job(jobscript, qsub_settings):
 qsub_settings = { "options" : {}, "resources" : {}}
 
 jobscript = parse_jobscript()
+warnings.warn("jobscript")
+warnings.warn(jobscript)
 
 # get the job properties dictionary from snakemake 
 job_properties = read_job_properties(jobscript)
+warnings.warn("job properties")
+warnings.warn(str(job_properties))
 
 # load the default cluster config
 cluster_config = load_cluster_config(CLUSTER_CONFIG)
