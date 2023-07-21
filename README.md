@@ -1,6 +1,8 @@
 # sge
 
-This profile configures [Snakemake](https://snakemake.readthedocs.io/en/stable/) to run on (Sun) Grid Engine.
+This profile configures [Snakemake](https://snakemake.readthedocs.io/en/stable/) to run on the UCL Computer Science (Sun) Grid Engine.
+
+## Change log to run on UCL CS Cluster
 
 ## Setup
 
