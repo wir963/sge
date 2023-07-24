@@ -131,7 +131,7 @@ def format_job_properties(string):
     # we use 'rulename' rather than 'rule' for consistency with the --cluster-config 
     # snakemake option
     if job_properties['type'] == 'group':
-      return string.format(rulename=job_properties["group_d"], jobid=job_properties['jobid']) #WR change 7/21 see https://github.com/Snakemake-Profiles/sge/pull/4
+      return string.format(rulename=job_properties["groupid"], jobid=job_properties['jobid']) #WR change 7/21 see https://github.com/Snakemake-Profiles/sge/pull/4
     return string.format(rulename=job_properties["rule"], jobid=job_properties['jobid'])
 
 
