@@ -32,7 +32,7 @@ To deploy this profile, run
 
 	mkdir -p ~/.config/snakemake
 	cd ~/.config/snakemake
-	cookiecutter https://github.com/Snakemake-Profiles/sge.git
+	cookiecutter https://github.com/wir963/sge.git
   
   
 Then, you can run Snakemake with
