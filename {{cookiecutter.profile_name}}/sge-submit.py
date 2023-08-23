@@ -83,7 +83,7 @@ RESOURCE_MAPPING = {
     "tscratch"         : ("tscratch"),
 }
 
-IGNORED_RESOURCES = ["mem_mib", "disk_mib", "disk_mb"] # add "file_size" and "disk_mb" if issues arise
+IGNORED_RESOURCES = ["disk_mib", "disk_mb"] # add "file_size" and "disk_mb" if issues arise
 
 
 NONREQUESTABLE_RESOURCES = ["tmpdir"]
