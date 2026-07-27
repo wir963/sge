@@ -13,7 +13,7 @@ import warnings
 from snakemake import io
 from snakemake.utils import read_job_properties
 
-DEFAULT_JOB_NAME = "snakemake_job"
+DEFAULT_JOB_NAME = "sj"
 QSUB_DEFAULTS = "-cwd -V"
 CLUSTER_CONFIG = "cluster.yaml"
 
@@ -74,19 +74,21 @@ RESOURCE_MAPPING = {
     "slots"            : ("slots",),
     "s_vmem"           : ("s_vmem", "soft_memory", "soft_virtual_memory"),
     # "mem_mb" is a default snakemake resource name which will be passed in
-    "mem"           : ("h_vmem", "mem_mb", "mem", "memory", "virtual_memory"),
+    "h_vmem"           : ("h_vmem", "mem_mb", "mem", "memory", "virtual_memory"),
+    "tmem"             : ("mem_mib"), # hack because we need to specify tmem
     "s_fsize"          : ("s_fsize", "soft_file_size"),
     # "disk_mb" is a default snakemake resource name which will be passed in
-    # "h_fsize"          : ("h_fsize", "disk_mb", "file_size"), # UCL cluster can throw error when requesting h_fsize
-    # "tmem"             : ("mem_mib"), # added by WR because tmem must be specified; may use mem_mb?
+    "h_fsize"          : ("h_fsize", "disk_mb", "file_size"),
     # "tscratch" allocates temporary storage - added by WR 6/5/23
     "tscratch"         : ("tscratch"),
+    # added by WR 8/12/25 to get support for gpu
+    "gpu"              : ("gpu",),
 }
 
-IGNORED_RESOURCES = ["disk_mib", "disk_mb", "mem_mib"] # add "file_size" and "disk_mb" if issues arise
-
-
-NONREQUESTABLE_RESOURCES = ["tmpdir"]
+# Snakemake 7 and newer add a 'tmpdir' default resource but it is usually
+# not requestable in grid engine, hence we must make it explicitly
+# non-requestable.
+NONREQUESTABLE_RESOURCES = ["tmpdir", "mem_mib", "disk_mib", "disk_mb", "h_fsize", "file_size"]
 
 def add_custom_resources(resources, resource_mapping=RESOURCE_MAPPING):
     """Adds new resources to resource_mapping.
@@ -108,6 +110,7 @@ def add_custom_resources(resources, resource_mapping=RESOURCE_MAPPING):
             if val != key:
                 resource_mapping[key] += (val,)
 
+# this parses the argument --jobscript, which provides a custom job script for submission to the cluster
 def parse_jobscript():
     """Minimal CLI to require/only accept single positional argument."""
     p = argparse.ArgumentParser(description="SGE snakemake submit script")
@@ -134,20 +137,16 @@ def format_job_properties(string):
       return string.format(rulename=job_properties["groupid"], jobid=job_properties['jobid']) #WR change 7/21 see https://github.com/Snakemake-Profiles/sge/pull/4
     return string.format(rulename=job_properties["rule"], jobid=job_properties['jobid'])
 
-
 def parse_qsub_settings(source, resource_mapping=RESOURCE_MAPPING, option_mapping=OPTION_MAPPING):
     job_options = { "options" : {}, "resources" : {}}
 
     for skey, sval in source.items():
-        warnings.warn("sval")
-        warnings.warn(sval)
+        #warnings.warn("sval")
+        #warnings.warn(sval)
         found = False
         for rkey, rval in resource_mapping.items():
-            warnings.warn("rval")
-            warnings.warn(rval)
-            if skey in IGNORED_RESOURCES:
-                found = True
-                break
+            #warnings.warn("rval")
+            #warnings.warn(rval)
             if skey in rval:
                 found = True
                 # Snakemake resources can only be defined as integers, but SGE interprets
@@ -168,9 +167,9 @@ def parse_qsub_settings(source, resource_mapping=RESOURCE_MAPPING, option_mappin
                 job_options["options"].update({okey : sval})
                 break
         if not found:
-            warnings.warn(f"Unknown SGE option or resource: {skey}") # WR added 7/21
+            warnings.warn(f"Unknown SGE option or resource: {skey}")
             continue
-            # raise KeyError(f"Unknown SGE option or resource: {skey}")
+            #raise KeyError(f"Unknown SGE option or resource: {skey}")
 
     return job_options
 
@@ -215,15 +214,16 @@ def sge_resource_string(key, val):
 def submit_job(jobscript, qsub_settings):
     """Submit jobscript and return jobid."""
 
-    # remove any non-requestable resources which have somehow been added to
-    # the resource list
+    # remove any non-requestable resources which have been added as complex resouces
     for resource in list(qsub_settings["resources"].keys()):
       if resource in NONREQUESTABLE_RESOURCES:
         del qsub_settings["resources"][resource]
 
     flatten = lambda l: [item for sublist in l for item in sublist]
     batch_options = flatten([sge_option_string(k,v).split() for k, v in qsub_settings["options"].items()])
+    warnings.warn(str(batch_options))
     batch_resources = flatten([sge_resource_string(k, v).split() for k, v in qsub_settings["resources"].items()])
+    warnings.warn(str(batch_resources))
     try:
         # -terse means only the jobid is returned rather than the normal 'Your job...' string
         jobid = subprocess.check_output(["qsub", "-terse"] + batch_options + batch_resources + [jobscript]).decode().rstrip()
@@ -235,15 +235,16 @@ def submit_job(jobscript, qsub_settings):
 
 qsub_settings = { "options" : {}, "resources" : {}}
 
+# this parses the argument --jobscript, which provides a custom job script for submission to the cluster 
 jobscript = parse_jobscript()
 warnings.warn("jobscript")
 warnings.warn(jobscript)
 
+# read_job_properties is a function defined by Snakemake
 # get the job properties dictionary from snakemake 
 job_properties = read_job_properties(jobscript)
 warnings.warn("job properties")
 warnings.warn(str(job_properties))
-
 # load the default cluster config
 cluster_config = load_cluster_config(CLUSTER_CONFIG)
 
@@ -268,18 +269,30 @@ update_double_dict(qsub_settings, parse_qsub_settings(cluster_config.get(job_pro
 update_double_dict(qsub_settings, parse_qsub_settings(job_properties.get("cluster", {})))
 
 # Request an SMP parallel environment matching the rule's `threads:` so SGE reserves
-# that many slots on ONE node for multi-threaded / multi-process jobs. Snakemake exposes
-# threads at the TOP LEVEL of job_properties, not under "resources", so the resource loop
-# above never sees it -- without this every rule is submitted as a 1-slot job and SGE
-# overpacks nodes (the aggregate thread count of co-resident jobs trips the per-user
-# RLIMIT_NPROC -> pthread_create / libgomp "Thread creation failed" EAGAIN). -R y turns on
-# resource reservation so smaller jobs can't leapfrog and starve the multi-slot request.
-# setdefault: an explicit pe/R from cluster.yaml still wins. NB: threads is clamped by
-# Snakemake to --cores, so --cores must be >= the largest threads: you want to request.
+# that many slots on ONE node. Snakemake exposes threads at the TOP LEVEL of
+# job_properties (not under "resources"), so the resource loop never sees it -> without
+# this every rule is a 1-slot job and SGE overpacks nodes (aggregate threads trip the
+# per-user RLIMIT_NPROC -> pthread_create / libgomp EAGAIN). -R y = resource reservation.
 threads = int(job_properties.get("threads", 1) or 1)
 if threads > 1:
     qsub_settings["options"].setdefault("pe", f"smp {threads}")
     qsub_settings["options"].setdefault("R", "y")
+
+# Derive BOTH memory limits from mem_mb so they stay consistent and slot-aware, instead
+# of letting h_vmem come from mem_mb while tmem comes from Snakemake's auto-derived
+# mem_mib (which rounds differently -> 48000M vs ~45777M, and is NOT slot-aware).
+#   h_vmem (consumable=NO)  -> per-PROCESS ceiling. Keep it at the full mem_mb so one fat
+#                             process (e.g. the R AIB step) isn't killed under -pe smp.
+#   tmem   (consumable=YES, FORCED) -> per-SLOT. Divide by threads so tmem*threads == the
+#                             requested mem_mb total and the job actually schedules.
+# At threads=1 the two are identical (this is what removes the mem_mb vs mem_mib mismatch).
+# ceil division via -(-a // b) avoids importing math. Overrides the h_vmem/tmem values the
+# mem_mb/mem_mib aliases produced in the resource loop above.
+_mem_mb = job_properties.get("resources", {}).get("mem_mb")
+if _mem_mb is not None:
+    _mem_mb = int(_mem_mb)
+    qsub_settings["resources"]["h_vmem"] = "{}M".format(_mem_mb)
+    qsub_settings["resources"]["tmem"] = "{}M".format(-(-_mem_mb // threads))
 
 # ensure qsub output dirs exist
 for o in ("o", "e"):
@@ -287,4 +300,3 @@ for o in ("o", "e"):
 
 # submit job and echo id back to Snakemake (must be the only stdout)
 print(submit_job(jobscript, qsub_settings))
-

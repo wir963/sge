@@ -2,6 +2,15 @@
 
 This profile configures [Snakemake](https://snakemake.readthedocs.io/en/stable/) to run on the UCL Computer Science (Sun) Grid Engine.
 
+> **Deployment model (2026-07): plain git-tracked profile, not cookiecutter.**
+> This repo used to be a [cookiecutter](https://cookiecutter.readthedocs.io) *template* that
+> generated a profile. That caused drift: real fixes were hand-edited on the deployed copy
+> (`~/.config/snakemake/sge/`) and never made it back to the template, and regenerating would
+> have clobbered them. We flattened it to a plain profile whose files sit at the repo root, so
+> the live profile is a **git checkout of this repo** and deploying is just `git pull` — same
+> as the other repos. Do **not** reintroduce cookiecutter unless you need to generate multiple
+> distinct profiles from one template (we don't).
+
 ## Change log to run on UCL CS Cluster
 
 Don't use `sge-status.py` because it uses tools not supported by UCL cluster and may cause cluster to crash. 
@@ -28,23 +37,30 @@ rule example:
 
 ### Deploy profile
 
-To deploy this profile, run
+To deploy this profile, clone it to the Snakemake profile search path (the directory name
+is what you pass to `--profile`):
 
 	mkdir -p ~/.config/snakemake
-	cd ~/.config/snakemake
-	cookiecutter https://github.com/wir963/sge.git
-  
-  
-Then, you can run Snakemake with
+	git clone git@github.com:wir963/sge.git ~/.config/snakemake/sge
+
+Then run Snakemake with
 
 	snakemake --profile sge ...
-  
-### Cookiecutter options
 
-* `profile_name` : A name to address the profile via the `--profile` Snakemake option.
-* `cluster_config` : Path to a YAML or JSON configuration file analogues to the
-  Snakemake [`--cluster-config` option](https://snakemake.readthedocs.io/en/stable/snakefiles/configuration.html#cluster-configuration-deprecated).
-  This is also used to define custom resources on the SGE cluster.
+To pick up later changes, `cd ~/.config/snakemake/sge && git pull`. Edit the profile locally,
+commit, push, and pull on each machine that uses it.
+
+### Multithreading (SMP) and memory
+
+`sge-submit.py` translates a rule's `threads:` into an SMP reservation and derives both memory
+limits from `mem_mb` so they stay consistent and slot-aware:
+
+* `threads: N` (N > 1) -> `-pe smp N -R y` (reserve N slots on one node, with resource
+  reservation). This requires `--cores >= N` in the launcher, or Snakemake clamps `threads`.
+* `h_vmem` (SGE `consumable=NO`, a per-**process** ceiling) = `mem_mb` in full, so one fat
+  process isn't killed under SMP.
+* `tmem` (SGE `consumable=YES, FORCED`, per-**slot**) = `ceil(mem_mb / threads)`, so
+  `tmem * threads == mem_mb` total and the job schedules. At `threads=1` the two are equal.
   
 ### Default snakemake arguments
 Default arguments to ``snakemake`` maybe adjusted in the ``<profile path>/config.yaml`` file.
