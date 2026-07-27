@@ -74,16 +74,16 @@ RESOURCE_MAPPING = {
     "slots"            : ("slots",),
     "s_vmem"           : ("s_vmem", "soft_memory", "soft_virtual_memory"),
     # "mem_mb" is a default snakemake resource name which will be passed in
-    "h_vmem"           : ("h_vmem", "mem_mb", "mem", "memory", "virtual_memory"),
+    "mem"           : ("h_vmem", "mem_mb", "mem", "memory", "virtual_memory"),
     "s_fsize"          : ("s_fsize", "soft_file_size"),
     # "disk_mb" is a default snakemake resource name which will be passed in
     # "h_fsize"          : ("h_fsize", "disk_mb", "file_size"), # UCL cluster can throw error when requesting h_fsize
-    "tmem"             : ("mem_mib"), # added by WR because tmem must be specified; may use mem_mb?
+    # "tmem"             : ("mem_mib"), # added by WR because tmem must be specified; may use mem_mb?
     # "tscratch" allocates temporary storage - added by WR 6/5/23
     "tscratch"         : ("tscratch"),
 }
 
-IGNORED_RESOURCES = ["disk_mib", "disk_mb"] # add "file_size" and "disk_mb" if issues arise
+IGNORED_RESOURCES = ["disk_mib", "disk_mb", "mem_mib"] # add "file_size" and "disk_mb" if issues arise
 
 
 NONREQUESTABLE_RESOURCES = ["tmpdir"]
@@ -266,6 +266,20 @@ update_double_dict(qsub_settings, parse_qsub_settings(cluster_config.get(job_pro
 
 # get any options/resources specified through the --cluster-config command line argument
 update_double_dict(qsub_settings, parse_qsub_settings(job_properties.get("cluster", {})))
+
+# Request an SMP parallel environment matching the rule's `threads:` so SGE reserves
+# that many slots on ONE node for multi-threaded / multi-process jobs. Snakemake exposes
+# threads at the TOP LEVEL of job_properties, not under "resources", so the resource loop
+# above never sees it -- without this every rule is submitted as a 1-slot job and SGE
+# overpacks nodes (the aggregate thread count of co-resident jobs trips the per-user
+# RLIMIT_NPROC -> pthread_create / libgomp "Thread creation failed" EAGAIN). -R y turns on
+# resource reservation so smaller jobs can't leapfrog and starve the multi-slot request.
+# setdefault: an explicit pe/R from cluster.yaml still wins. NB: threads is clamped by
+# Snakemake to --cores, so --cores must be >= the largest threads: you want to request.
+threads = int(job_properties.get("threads", 1) or 1)
+if threads > 1:
+    qsub_settings["options"].setdefault("pe", f"smp {threads}")
+    qsub_settings["options"].setdefault("R", "y")
 
 # ensure qsub output dirs exist
 for o in ("o", "e"):
